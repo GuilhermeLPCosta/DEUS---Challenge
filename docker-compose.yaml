@@ -1,0 +1,64 @@
+version: '3.7'
+services:
+  postgres:
+    image: library/postgres
+    restart: unless-stopped
+    ports:
+      - 5432:5432/tcp
+    environment:
+      - POSTGRES_PASSWORD=secretpassword
+      - POSTGRES_USER=application
+      - POSTGRES_DB=application
+    hostname: postgres
+    volumes:
+      - ./pgdata/data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U application -d application"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  etl:
+    build:
+      context: .
+      dockerfile: Dockerfile.etl
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://application:secretpassword@postgres:5432/application
+    volumes:
+      - ./data:/app/data
+    profiles:
+      - etl
+
+  # api:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.api
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   environment:
+  #     - DATABASE_URL=postgresql://application:secretpassword@postgres:5432/application
+  #   profiles:
+  #     - api
+
+  # # Combined service for development
+  # app:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.etl
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   environment:
+  #     - DATABASE_URL=postgresql://application:secretpassword@postgres:5432/application
+  #   volumes:
+  #     - ./data:/app/data
+  #   command: >
+  #     sh -c "python -m app.etl && python -m app.api"
