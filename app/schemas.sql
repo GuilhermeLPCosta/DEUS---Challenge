@@ -90,8 +90,8 @@ CREATE INDEX IF NOT EXISTS idx_actor_ratings_score ON actor_ratings(score DESC);
 
 -- Function to refresh materialized view
 CREATE OR REPLACE FUNCTION refresh_actor_ratings()
-RETURNS void AS $$
+RETURNS void AS $function$
 BEGIN
     REFRESH MATERIALIZED VIEW actor_ratings;
 END;
-$$ LANGUAGE plpgsql;
+$function$ LANGUAGE plpgsql;

@@ -32,33 +32,33 @@ services:
     profiles:
       - etl
 
-  # api:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.api
-  #   ports:
-  #     - "8000:8000"
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #   environment:
-  #     - DATABASE_URL=postgresql://application:secretpassword@postgres:5432/application
-  #   profiles:
-  #     - api
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://application:secretpassword@postgres:5432/application
+    profiles:
+      - api
 
-  # # Combined service for development
-  # app:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.etl
-  #   ports:
-  #     - "8000:8000"
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #   environment:
-  #     - DATABASE_URL=postgresql://application:secretpassword@postgres:5432/application
-  #   volumes:
-  #     - ./data:/app/data
-  #   command: >
-  #     sh -c "python -m app.etl && python -m app.api"
+  # Combined service for development
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.etl
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://application:secretpassword@postgres:5432/application
+    volumes:
+      - ./data:/app/data
+    command: >
+      sh -c "python -m app.etl && python -m app.api"
