@@ -143,6 +143,7 @@ class ConfigurationLoader:
         return result
 
 
+
 def load_configuration(env_file: Optional[str] = None, validate: bool = True, exit_on_error: bool = True) -> Settings:
     """
     Convenience function to load configuration with error handling

@@ -81,7 +81,6 @@ class Person(Base):
             "known_for_titles": self.known_for_titles,
         }
 
-
 class Title(Base):
     """Title table for IMDb data"""
 

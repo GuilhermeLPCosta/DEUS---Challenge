@@ -17,7 +17,6 @@ logger = monitoring.get_logger("database.connection")
 _engine: Optional[Engine] = None
 _session_factory: Optional[sessionmaker] = None
 
-
 def get_engine() -> Engine:
     """Get database engine"""
     global _engine

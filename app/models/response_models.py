@@ -20,7 +20,6 @@ class ActorResponse(BaseModel):
         """Ensure score is properly rounded"""
         return round(v, 2)
 
-
 class PaginationMeta(BaseModel):
     """Pagination metadata"""
 

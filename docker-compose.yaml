@@ -76,3 +76,4 @@ volumes:
 networks:
   imdb_network:
     driver: bridge
+    

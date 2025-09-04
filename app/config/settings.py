@@ -5,7 +5,6 @@ Environment-based configuration loader
 import os
 from typing import Any, Dict, Optional
 
-
 class Settings:
     """Configuration class using environment variables"""
 

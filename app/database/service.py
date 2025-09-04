@@ -14,7 +14,6 @@ from app.services.logger_service import get_logger
 
 from .models import ActorRating, ETLRun
 
-
 @dataclass
 class ActorSearchResult:
     """Actor search result with pagination info"""

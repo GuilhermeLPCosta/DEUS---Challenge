@@ -53,7 +53,6 @@ class DatabaseHealthCheck(HealthCheck):
                 error=str(e),
             )
 
-
 # Initialize monitoring service with health checks
 monitoring_service = get_monitoring_service()
 monitoring_service.add_health_check(DatabaseHealthCheck())
