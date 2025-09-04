@@ -1,64 +1,78 @@
-version: '3.7'
+version: '3.8'
+
 services:
   postgres:
-    image: library/postgres
-    restart: unless-stopped
+    image: postgres:15
+    container_name: imdb_postgres
+    environment:
+      POSTGRES_DB: imdb_db
+      POSTGRES_USER: imdb_user
+      POSTGRES_PASSWORD: imdb_password
     ports:
-      - 5432:5432/tcp
-    environment:
-      - POSTGRES_PASSWORD=secretpassword
-      - POSTGRES_USER=application
-      - POSTGRES_DB=application
-    hostname: postgres
+      - "5432:5432"
     volumes:
-      - ./pgdata/data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U application -d application"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD-SHELL", "pg_isready -U imdb_user -d imdb_db"]
+      interval: 10s
+      timeout: 5s
       retries: 5
-
-  etl:
-    build:
-      context: .
-      dockerfile: Dockerfile.etl
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      - DATABASE_URL=postgresql://application:secretpassword@postgres:5432/application
-    volumes:
-      - ./data:/app/data
-    profiles:
-      - etl
+    networks:
+      - imdb_network
 
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile.api
+    build: .
+    container_name: imdb_api
+    environment:
+      DATABASE_URL: postgresql://imdb_user:imdb_password@postgres:5432/imdb_db
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      DEBUG: "true"
+      DATA_DIR: /app/data
+      IMDB_BASE_URL: https://datasets.imdbws.com/
+      TARGET_PROFESSIONS: actor,actress
+      CHUNK_SIZE: 1000
+      ETL_TIMEOUT: 300
+      LOG_LEVEL: INFO
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
-    environment:
-      - DATABASE_URL=postgresql://application:secretpassword@postgres:5432/application
-    profiles:
-      - api
-
-  # Combined service for development
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile.etl
-    ports:
-      - "8000:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      - DATABASE_URL=postgresql://application:secretpassword@postgres:5432/application
     volumes:
       - ./data:/app/data
-    command: >
-      sh -c "python -m app.etl && python -m app.api"
+      - .:/app
+    networks:
+      - imdb_network
+    command: uvicorn app.api:app --host 0.0.0.0 --port 8000 --reload
+
+  # Service to create mock data
+  setup:
+    build: .
+    container_name: imdb_setup
+    environment:
+      DATABASE_URL: postgresql://imdb_user:imdb_password@postgres:5432/imdb_db
+      DATA_DIR: /app/data
+      IMDB_BASE_URL: https://datasets.imdbws.com/
+      TARGET_PROFESSIONS: actor,actress
+      CHUNK_SIZE: 1000
+      ETL_TIMEOUT: 300
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - .:/app
+    networks:
+      - imdb_network
+    command: python scripts/create_mock_data.py
+    profiles:
+      - setup
+
+volumes:
+  postgres_data:
+
+networks:
+  imdb_network:
+    driver: bridge
