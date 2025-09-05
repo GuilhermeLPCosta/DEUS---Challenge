@@ -18,38 +18,43 @@ from app.database.connection import get_engine
 from app.database.models import ActorRating, ETLRun, Person, Principal, Rating, Title
 
 # Sample data
-ACTOR_NAMES = [
+ACTORS = [
     "Leonardo DiCaprio",
-    "Meryl Streep",
     "Robert De Niro",
-    "Scarlett Johansson",
     "Tom Hanks",
-    "Natalie Portman",
     "Brad Pitt",
-    "Cate Blanchett",
     "Denzel Washington",
-    "Jennifer Lawrence",
     "Morgan Freeman",
-    "Emma Stone",
     "Christian Bale",
-    "Charlize Theron",
     "Matthew McConaughey",
-    "Amy Adams",
     "Ryan Gosling",
-    "Viola Davis",
     "Jake Gyllenhaal",
-    "Saoirse Ronan",
     "Oscar Isaac",
-    "Lupita Nyong'o",
     "Michael Fassbender",
-    "Brie Larson",
     "Joaquin Phoenix",
-    "Margot Robbie",
     "Adam Driver",
-    "Tilda Swinton",
     "Mahershala Ali",
+]
+
+ACTRESSES = [
+    "Meryl Streep",
+    "Scarlett Johansson",
+    "Natalie Portman",
+    "Cate Blanchett",
+    "Jennifer Lawrence",
+    "Emma Stone",
+    "Charlize Theron",
+    "Amy Adams",
+    "Viola Davis",
+    "Saoirse Ronan",
+    "Lupita Nyong'o",
+    "Brie Larson",
+    "Margot Robbie",
+    "Tilda Swinton",
     "Frances McDormand",
 ]
+
+ACTOR_NAMES = ACTORS + ACTRESSES
 
 MOVIE_TITLES = [
     "The Shawshank Redemption",
@@ -123,12 +128,13 @@ def create_mock_data():
         print("Creating people...")
         people = []
         for i, name in enumerate(ACTOR_NAMES):
+            profession = "actor" if name in ACTORS else "actress"
             person = Person(
                 nconst=f"nm{1000000 + i:07d}",
                 primary_name=name,
                 birth_year=randint(1950, 1995),
                 death_year=None if randint(0, 10) > 1 else randint(2000, 2023),
-                primary_profession=choice(["actor", "actress"]),
+                primary_profession=profession,
                 known_for_titles=f"tt{randint(1000000, 9999999):07d}",
             )
             people.append(person)
