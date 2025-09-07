@@ -4,10 +4,10 @@ Simplified ETL pipeline for IMDb data processing using SQLAlchemy ORM
 
 import gzip
 import os
+import time
 from datetime import datetime
 from typing import Dict
 
-import pandas as pd
 import requests
 from sqlalchemy.orm import sessionmaker
 
@@ -27,13 +27,39 @@ class IMDbETL:
     def __init__(self):
         self.settings = settings
         self.data_dir = settings.data_dir
-        self.engine = get_engine()
-        self.Session = sessionmaker(bind=self.engine)
-
+        
         # Create data directory
         os.makedirs(self.data_dir, exist_ok=True)
+        
+        # Initialize database connection with retry logic
+        self._init_database_connection()
 
         logger.info(f"ETL initialized - data_dir: {self.data_dir}")
+
+    def _init_database_connection(self, max_retries: int = 30, retry_interval: int = 2):
+        """Initialize database connection with retry logic"""
+        logger.info("Initializing database connection for ETL")
+        
+        for attempt in range(max_retries):
+            try:
+                self.engine = get_engine()
+                self.Session = sessionmaker(bind=self.engine)
+                
+                # Test connection
+                with self.Session() as session:
+                    from sqlalchemy import text
+                    session.execute(text("SELECT 1"))
+                
+                logger.info("Database connection established successfully")
+                return
+                
+            except Exception as e:
+                logger.warning(f"Database connection attempt {attempt + 1} failed - error: {str(e)}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_interval)
+                else:
+                    logger.error("Database connection failed after all retries")
+                    raise Exception("Could not establish database connection for ETL")
 
     @log_execution_time("etl.download")
     @handle_exceptions("etl", "file_download")
@@ -83,229 +109,259 @@ class IMDbETL:
 
     @log_execution_time("etl.process_people")
     @handle_exceptions("etl", "process_people")
-
     def process_people(self, file_path: str) -> int:
-        """Process name.basics.tsv.gz file using SQLAlchemy ORM"""
-        logger.info(f"Processing people file - file_path: {file_path}")
-
-        # Read and clean data
-        with gzip.open(file_path, "rt", encoding="utf-8") as f:
-            df = pd.read_csv(f, sep="\t", na_values="\\N")
-
-        # Clean data
-        df = df.dropna(subset=["primaryName"])
-        df["birthYear"] = pd.to_numeric(df["birthYear"], errors="coerce")
-        df["deathYear"] = pd.to_numeric(df["deathYear"], errors="coerce")
-
-        # Filter for actors/actresses
-        df_actors = df[df["primaryProfession"].str.contains("actor|actress", na=False, case=False)]
-
-        logger.info(f"People data loaded - total_records: {len(df)}, actor_records: {len(df_actors)}")
-
-        # Insert data using ORM
+        """Process name.basics.tsv.gz file using streaming approach"""
+        logger.info(f"Processing people file (streaming) - file_path: {file_path}")
+        
         records_processed = 0
-        chunk_size = self.settings.chunk_size
+        batch_size = 100  # Small batch size for memory efficiency
+        batch = []
 
         with self.Session() as session:
             # Clear existing data
             session.query(Person).delete()
             session.commit()
 
-            for i in range(0, len(df_actors), chunk_size):
-                chunk = df_actors.iloc[i : i + chunk_size]
+            with gzip.open(file_path, "rt", encoding="utf-8") as f:
+                # Skip header
+                header = f.readline()
+                
+                for line_num, line in enumerate(f, 1):
+                    try:
+                        fields = line.strip().split('\t')
+                        if len(fields) < 6:
+                            continue
+                            
+                        # Only process actors/actresses
+                        primary_profession = fields[4] if fields[4] != '\\N' else ''
+                        if not ('actor' in primary_profession.lower() or 'actress' in primary_profession.lower()):
+                            continue
+                        
+                        person = Person(
+                            nconst=fields[0],
+                            primary_name=fields[1] if fields[1] != '\\N' else None,
+                            birth_year=int(fields[2]) if fields[2] != '\\N' and fields[2].isdigit() else None,
+                            death_year=int(fields[3]) if fields[3] != '\\N' and fields[3].isdigit() else None,
+                            primary_profession=primary_profession if primary_profession else None,
+                            known_for_titles=fields[5] if fields[5] != '\\N' else None,
+                        )
+                        
+                        batch.append(person)
+                        
+                        if len(batch) >= batch_size:
+                            session.add_all(batch)
+                            session.commit()
+                            records_processed += len(batch)
+                            batch = []
+                            
+                            if records_processed % 1000 == 0:
+                                logger.info(f"People processing progress - records_processed: {records_processed}")
+                    
+                    except Exception as e:
+                        logger.warning(f"Error processing line {line_num}: {e}")
+                        continue
 
-                # Create Person objects
-                people = []
-                for _, row in chunk.iterrows():
-                    person = Person(
-                        nconst=row["nconst"],
-                        primary_name=row["primaryName"],
-                        birth_year=int(row["birthYear"]) if pd.notna(row["birthYear"]) else None,
-                        death_year=int(row["deathYear"]) if pd.notna(row["deathYear"]) else None,
-                        primary_profession=row["primaryProfession"],
-                        known_for_titles=row["knownForTitles"],
-                    )
-                    people.append(person)
-
-                # Bulk insert
-                session.add_all(people)
-                session.commit()
-                records_processed += len(people)
-
-                if records_processed % 10000 == 0:
-                    logger.info(f"People processing progress - records_processed: {records_processed}")
+                # Process remaining batch
+                if batch:
+                    session.add_all(batch)
+                    session.commit()
+                    records_processed += len(batch)
 
         logger.info(f"People processing completed - records_processed: {records_processed}")
         return records_processed
 
     @log_execution_time("etl.process_titles")
     @handle_exceptions("etl", "process_titles")
-
     def process_titles(self, file_path: str) -> int:
-        """Process title.basics.tsv.gz file using SQLAlchemy ORM"""
-        logger.info(f"Processing titles file - file_path: {file_path}")
-
-        with gzip.open(file_path, "rt", encoding="utf-8") as f:
-            df = pd.read_csv(f, sep="\t", na_values="\\N")
-
-        # Clean data
-        df = df.dropna(subset=["primaryTitle"])
-        df["startYear"] = pd.to_numeric(df["startYear"], errors="coerce")
-        df["endYear"] = pd.to_numeric(df["endYear"], errors="coerce")
-        df["runtimeMinutes"] = pd.to_numeric(df["runtimeMinutes"], errors="coerce")
-
-        logger.info(f"Titles data loaded - total_records: {len(df)}")
-
+        """Process title.basics.tsv.gz file using streaming approach"""
+        logger.info(f"Processing titles file (streaming) - file_path: {file_path}")
+        
         records_processed = 0
-        chunk_size = self.settings.chunk_size
+        batch_size = 100
+        batch = []
 
         with self.Session() as session:
             # Clear existing data
             session.query(Title).delete()
             session.commit()
 
-            for i in range(0, len(df), chunk_size):
-                chunk = df.iloc[i : i + chunk_size]
+            with gzip.open(file_path, "rt", encoding="utf-8") as f:
+                # Skip header
+                header = f.readline()
+                
+                for line_num, line in enumerate(f, 1):
+                    try:
+                        fields = line.strip().split('\t')
+                        if len(fields) < 9:
+                            continue
+                        
+                        title = Title(
+                            tconst=fields[0],
+                            title_type=fields[1] if fields[1] != '\\N' else None,
+                            primary_title=fields[2] if fields[2] != '\\N' else None,
+                            original_title=fields[3] if fields[3] != '\\N' else None,
+                            is_adult=fields[4] == "1",
+                            start_year=int(fields[5]) if fields[5] != '\\N' and fields[5].isdigit() else None,
+                            end_year=int(fields[6]) if fields[6] != '\\N' and fields[6].isdigit() else None,
+                            runtime_minutes=int(fields[7]) if fields[7] != '\\N' and fields[7].isdigit() else None,
+                            genres=fields[8] if fields[8] != '\\N' else None,
+                        )
+                        
+                        batch.append(title)
+                        
+                        if len(batch) >= batch_size:
+                            session.add_all(batch)
+                            session.commit()
+                            records_processed += len(batch)
+                            batch = []
+                            
+                            if records_processed % 1000 == 0:
+                                logger.info(f"Titles processing progress - records_processed: {records_processed}")
+                    
+                    except Exception as e:
+                        logger.warning(f"Error processing line {line_num}: {e}")
+                        continue
 
-                # Create Title objects
-                titles = []
-                for _, row in chunk.iterrows():
-                    title = Title(
-                        tconst=row["tconst"],
-                        title_type=row["titleType"],
-                        primary_title=row["primaryTitle"],
-                        original_title=row["originalTitle"],
-                        is_adult=row["isAdult"] == "1",
-                        start_year=int(row["startYear"]) if pd.notna(row["startYear"]) else None,
-                        end_year=int(row["endYear"]) if pd.notna(row["endYear"]) else None,
-                        runtime_minutes=int(row["runtimeMinutes"]) if pd.notna(row["runtimeMinutes"]) else None,
-                        genres=row["genres"],
-                    )
-                    titles.append(title)
-
-                # Bulk insert
-                session.add_all(titles)
-                session.commit()
-                records_processed += len(titles)
-
-                if records_processed % 10000 == 0:
-                    logger.info(f"Titles processing progress - records_processed: {records_processed}")
+                # Process remaining batch
+                if batch:
+                    session.add_all(batch)
+                    session.commit()
+                    records_processed += len(batch)
 
         logger.info(f"Titles processing completed - records_processed: {records_processed}")
         return records_processed
 
     @log_execution_time("etl.process_ratings")
     @handle_exceptions("etl", "process_ratings")
-
     def process_ratings(self, file_path: str) -> int:
-        """Process title.ratings.tsv.gz file using SQLAlchemy ORM"""
-        logger.info(f"Processing ratings file - file_path: {file_path}")
-
-        with gzip.open(file_path, "rt", encoding="utf-8") as f:
-            df = pd.read_csv(f, sep="\t", na_values="\\N")
-
-        df["averageRating"] = pd.to_numeric(df["averageRating"], errors="coerce")
-        df["numVotes"] = pd.to_numeric(df["numVotes"], errors="coerce")
-        df = df.dropna()
-
-        logger.info(f"Ratings data loaded - total_records: {len(df)}")
-
+        """Process title.ratings.tsv.gz file using streaming approach"""
+        logger.info(f"Processing ratings file (streaming) - file_path: {file_path}")
+        
         records_processed = 0
-        chunk_size = self.settings.chunk_size
+        batch_size = 100
+        batch = []
 
         with self.Session() as session:
             # Clear existing data
             session.query(Rating).delete()
             session.commit()
 
-            for i in range(0, len(df), chunk_size):
-                chunk = df.iloc[i : i + chunk_size]
+            with gzip.open(file_path, "rt", encoding="utf-8") as f:
+                # Skip header
+                header = f.readline()
+                
+                for line_num, line in enumerate(f, 1):
+                    try:
+                        fields = line.strip().split('\t')
+                        if len(fields) < 3:
+                            continue
+                        
+                        rating = Rating(
+                            tconst=fields[0],
+                            average_rating=float(fields[1]) if fields[1] != '\\N' else None,
+                            num_votes=int(fields[2]) if fields[2] != '\\N' and fields[2].isdigit() else None,
+                        )
+                        
+                        if rating.average_rating is not None and rating.num_votes is not None:
+                            batch.append(rating)
+                        
+                        if len(batch) >= batch_size:
+                            session.add_all(batch)
+                            session.commit()
+                            records_processed += len(batch)
+                            batch = []
+                            
+                            if records_processed % 1000 == 0:
+                                logger.info(f"Ratings processing progress - records_processed: {records_processed}")
+                    
+                    except Exception as e:
+                        logger.warning(f"Error processing line {line_num}: {e}")
+                        continue
 
-                # Create Rating objects
-                ratings = []
-                for _, row in chunk.iterrows():
-                    rating = Rating(
-                        tconst=row["tconst"], average_rating=float(row["averageRating"]), num_votes=int(row["numVotes"])
-                    )
-                    ratings.append(rating)
-
-                # Bulk insert
-                session.add_all(ratings)
-                session.commit()
-                records_processed += len(ratings)
-
-                if records_processed % 10000 == 0:
-                    logger.info(f"Ratings processing progress - records_processed: {records_processed}")
+                # Process remaining batch
+                if batch:
+                    session.add_all(batch)
+                    session.commit()
+                    records_processed += len(batch)
 
         logger.info(f"Ratings processing completed - records_processed: {records_processed}")
         return records_processed
 
     @log_execution_time("etl.process_principals")
     @handle_exceptions("etl", "process_principals")
-
     def process_principals(self, file_path: str) -> int:
-        """Process title.principals.tsv.gz file using SQLAlchemy ORM"""
-        logger.info(f"Processing principals file - file_path: {file_path}")
-
-        with gzip.open(file_path, "rt", encoding="utf-8") as f:
-            df = pd.read_csv(f, sep="\t", na_values="\\N")
-
-        # Filter for actors/actresses only
-        df = df[df["category"].isin(self.settings.target_professions)].copy()
-        df["ordering"] = pd.to_numeric(df["ordering"], errors="coerce")
-        df = df.dropna(subset=["tconst", "nconst", "category"])
-
-        logger.info(f"Principals data loaded - total_records: {len(df)}")
-
+        """Process title.principals.tsv.gz file using streaming approach"""
+        logger.info(f"Processing principals file (streaming) - file_path: {file_path}")
+        
         records_processed = 0
-        chunk_size = self.settings.chunk_size
+        batch_size = 100
+        batch = []
 
         with self.Session() as session:
             # Clear existing data
             session.query(Principal).delete()
             session.commit()
 
-            for i in range(0, len(df), chunk_size):
-                chunk = df.iloc[i : i + chunk_size]
+            with gzip.open(file_path, "rt", encoding="utf-8") as f:
+                # Skip header
+                header = f.readline()
+                
+                for line_num, line in enumerate(f, 1):
+                    try:
+                        fields = line.strip().split('\t')
+                        if len(fields) < 6:
+                            continue
+                        
+                        # Only process actors/actresses
+                        category = fields[3] if fields[3] != '\\N' else ''
+                        if category not in ['actor', 'actress']:
+                            continue
+                        
+                        principal = Principal(
+                            tconst=fields[0],
+                            ordering=int(fields[1]) if fields[1] != '\\N' and fields[1].isdigit() else 1,
+                            nconst=fields[2],
+                            category=category,
+                            job=fields[4] if fields[4] != '\\N' else None,
+                            characters=fields[5] if fields[5] != '\\N' else None,
+                        )
+                        
+                        batch.append(principal)
+                        
+                        if len(batch) >= batch_size:
+                            session.add_all(batch)
+                            session.commit()
+                            records_processed += len(batch)
+                            batch = []
+                            
+                            if records_processed % 1000 == 0:
+                                logger.info(f"Principals processing progress - records_processed: {records_processed}")
+                    
+                    except Exception as e:
+                        logger.warning(f"Error processing line {line_num}: {e}")
+                        continue
 
-                # Create Principal objects
-                principals = []
-                for _, row in chunk.iterrows():
-                    principal = Principal(
-                        tconst=row["tconst"],
-                        ordering=int(row["ordering"]) if pd.notna(row["ordering"]) else 1,
-                        nconst=row["nconst"],
-                        category=row["category"],
-                        job=row["job"] if pd.notna(row["job"]) else None,
-                        characters=row["characters"] if pd.notna(row["characters"]) else None,
-                    )
-                    principals.append(principal)
-
-                # Bulk insert
-                session.add_all(principals)
-                session.commit()
-                records_processed += len(principals)
-
-                if records_processed % 10000 == 0:
-                    logger.info(f"Principals processing progress - records_processed: {records_processed}")
+                # Process remaining batch
+                if batch:
+                    session.add_all(batch)
+                    session.commit()
+                    records_processed += len(batch)
 
         logger.info(f"Principals processing completed - records_processed: {records_processed}")
         return records_processed
 
     @log_execution_time("etl.refresh_view")
     @handle_exceptions("etl", "refresh_materialized_view")
-
     def refresh_materialized_view(self):
         """Refresh the actor_ratings table with computed data"""
         logger.info("Refreshing actor ratings table")
 
         with self.Session() as session:
             # Clear existing actor ratings
-            session.query(ActorRating).delete()
+            session.execute(text("DELETE FROM actor_ratings"))
             session.commit()
 
             # Compute new actor ratings from the base tables
-            from sqlalchemy import text
             query = text("""
             INSERT INTO actor_ratings (primary_name, profession, score, number_of_titles, total_runtime_minutes)
             SELECT 

@@ -20,6 +20,23 @@ services:
     networks:
       - imdb_network
 
+  # Migration service - runs first to set up database schema
+  migrations:
+    build: .
+    container_name: imdb_migrations
+    environment:
+      DATABASE_URL: postgresql://imdb_user:imdb_password@postgres:5432/imdb_db
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    networks:
+      - imdb_network
+    command: ["./scripts/startup.sh", "migrations"]
+    restart: "no"
+
   api:
     build: .
     container_name: imdb_api
@@ -31,22 +48,26 @@ services:
       DATA_DIR: /app/data
       IMDB_BASE_URL: https://datasets.imdbws.com/
       TARGET_PROFESSIONS: actor,actress
-      CHUNK_SIZE: 1000
-      ETL_TIMEOUT: 300
+      CHUNK_SIZE: 100
+      ETL_TIMEOUT: 600
       LOG_LEVEL: INFO
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
     volumes:
       - ./data:/app/data
       - .:/app
     networks:
       - imdb_network
-    command: uvicorn app.api:app --host 0.0.0.0 --port 8000 --reload
+    command: ["./scripts/startup.sh", "api"]
 
-  # Service to create mock data
+
+
+  # Service to create mock data (alternative to full ETL)
   setup:
     build: .
     container_name: imdb_setup
@@ -55,18 +76,21 @@ services:
       DATA_DIR: /app/data
       IMDB_BASE_URL: https://datasets.imdbws.com/
       TARGET_PROFESSIONS: actor,actress
-      CHUNK_SIZE: 1000
-      ETL_TIMEOUT: 300
+      CHUNK_SIZE: 100
+      ETL_TIMEOUT: 600
       LOG_LEVEL: INFO
     depends_on:
       postgres:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
     volumes:
       - ./data:/app/data
       - .:/app
     networks:
       - imdb_network
-    command: python scripts/create_mock_data.py
+    command: ["./scripts/startup.sh", "setup"]
+    restart: "no"
     profiles:
       - setup
 

@@ -1,5 +1,10 @@
 FROM python:3.11-slim
 
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+
 # Set working directory
 WORKDIR /app
 
@@ -18,6 +23,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
+# Make scripts executable
+RUN chmod +x scripts/*.sh scripts/*.py
+
 # Create data directory
 RUN mkdir -p /app/data
 
@@ -25,4 +33,4 @@ RUN mkdir -p /app/data
 EXPOSE 8000
 
 # Default command
-CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["./scripts/startup.sh", "api"]

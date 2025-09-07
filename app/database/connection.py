@@ -72,20 +72,14 @@ def test_connection() -> bool:
 
 
 def init_database():
-    """Initialize database connection and create tables if needed"""
+    """Initialize database connection (migrations handle schema)"""
     try:
         # Test connection first
         if not test_connection():
             raise Exception("Database connection test failed")
-
-        # Create tables using SQLAlchemy models if they don't exist
-        from app.database.models import Base
-        engine = get_engine()
         
-        # Create all tables defined in models
-        Base.metadata.create_all(engine)
-        
-        logger.info("Database initialized successfully")
+        logger.info("Database connection initialized successfully")
+        logger.info("Note: Database schema is managed by Alembic migrations")
 
     except Exception as e:
         logger.error(f"Database initialization failed: {str(e)}")

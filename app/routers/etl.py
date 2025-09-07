@@ -40,9 +40,8 @@ class ETLStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
 
-@handle_exceptions("etl_api", "background_etl_task")
-async def run_etl_background(file_type: Optional[str] = None):
-    """Background task to run ETL pipeline"""
+def run_etl_background(file_type: Optional[str] = None):
+    """Background task to run ETL pipeline (synchronous)"""
     logger.info(f"Starting background ETL task - file_type: {file_type}")
     
     try:
