@@ -10,7 +10,7 @@ from typing import Dict
 
 import requests
 from sqlalchemy.orm import sessionmaker
-
+from sqlalchemy import text
 from app.config.settings import get_settings
 from app.database.connection import get_engine
 from app.database.models import ActorRating, ETLRun, Person, Principal, Rating, Title

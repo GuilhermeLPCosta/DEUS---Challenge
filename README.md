@@ -75,21 +75,17 @@ The API returns actors/actresses with these key metrics:
 ### 1. Clone and Start
 ```bash
 git clone <repository-url>
-cd DEUS
-docker-compose up -d
+cd DEUS---Challenge
+chmod +x make.sh
+./make.sh dev
 ```
 
-### 2. Create Mock Data (for testing)
-```bash
-docker exec imdb_api python scripts/create_mock_data.py
-```
-
-### 3. Access the API
+### 2. Access the API
 - **API Base**: http://localhost:8000
 - **Documentation**: http://localhost:8000/docs
 - **Health Check**: http://localhost:8000/health
 
-### 4. Test API Endpoints
+### 3. Test API Endpoints
 ```bash
 # Get top actors
 curl "http://localhost:8000/actors?profession=actor&limit=5"
@@ -427,6 +423,7 @@ imdb-actors-api/
 │   ├── services/          # Business logic services
 │   ├── api.py             # FastAPI application setup
 │   └── etl.py             # ETL pipeline implementation
+├── migrations/            # Database migrations (Alembic)
 ├── scripts/               # Utility scripts
 ├── docker-compose.yml     # Docker services configuration
 ├── Dockerfile             # Container build instructions
